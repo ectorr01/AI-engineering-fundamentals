@@ -1,0 +1,96 @@
+# 🏆 ESERCIZIO BONUS — Chatbot completo in una cella
+#
+# Avete finito prima — bene. Questo esercizio integra tutto quello
+# che avete imparato oggi in un unico chatbot funzionante.
+#
+# ✅ Requisiti da implementare:
+# 1. Memoria persistente su JSON (carica all'avvio, salva dopo ogni messaggio)
+# 2. Sliding window: manda solo gli ultimi MAX_TURNI turni al modello
+# 3. Streaming con flush=True
+# 4. System prompt WiData
+# 5. Contatore token prima di ogni invio
+# 6. Funzione reset() per cancellare la storia
+# 7. Funzione storia() per vedere i messaggi salvati
+#
+# 🧪 Test che deve superare:
+# A. Esegui chat("Ciao, mi chiamo Sara.")
+# B. Esegui chat("Cosa fai?")
+# C. Esegui chat("Come mi chiamo?")         → deve rispondere "Sara"
+# D. Riavvia il kernel, riesegui la cella
+# E. Esegui chat("Ti ricordi di me?")       → deve ricordare Sara
+# F. Esegui reset(), poi storia()           → deve essere vuota
+#
+# 💡 Suggerimenti:
+# - ensure_ascii=False è obbligatorio per i caratteri italiani
+# - count_tokens() vuole la finestra già applicata, non tutta la history
+# - flush=True è obbligatorio per lo streaming token per token
+# - MAX_TURNI * 2 perché ogni turno = 1 user + 1 assistant
+
+import json, os
+from google.colab import userdata
+import anthropic
+
+os.environ["ANTHROPIC_API_KEY"] = userdata.get("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic()
+
+MEMORY_FILE = "chatbot_widata_bonus.json"
+MAX_TURNI = 10
+SYSTEM = """
+Sei l'assistente virtuale di WiData Srl, startup IoT di Sassari.
+Rispondi in modo professionale su prodotti e servizi IoT.
+Ricorda le informazioni fornite durante la conversazione.
+"""
+
+def carica_storia():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def salva_storia(history):
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+def chat(messaggio):
+    history = carica_storia()
+    finestra = history[-MAX_TURNI*2:]
+    token_pre = client.messages.count_tokens(
+        model="claude-haiku-4-5-20251001",
+        messages=finestra + [{"role":"user","content":messaggio}]
+    ).input_tokens if finestra or messaggio else 0
+    print(f"[📊 {token_pre} token | {len(history)} messaggi in storia]\n")
+    history.append({"role": "user", "content": messaggio})
+    finestra = history[-MAX_TURNI*2:]
+    print("🤖 ", end="", flush=True)
+    testo = ""
+    with client.messages.stream(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        system=SYSTEM,
+        messages=finestra
+    ) as stream:
+        for text in stream.text_stream:
+            testo += text
+            print(text, end="", flush=True)
+    print("\n")
+    history.append({"role": "assistant", "content": testo})
+    salva_storia(history)
+
+def reset():
+    if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
+    print("🗑️  Storia cancellata.")
+
+def storia():
+    h = carica_storia()
+    if not h: print("Nessun messaggio."); return
+    for i, m in enumerate(h):
+        ruolo = "Tu" if m["role"] == "user" else "🤖"
+        print(f"[{i+1}] {ruolo}: {m['content'][:80]}...")
+
+# ── Avvio ──────────────────────────────────────────────────────────
+h = carica_storia()
+print(f"🤖 Chatbot pronto. {len(h)} messaggi in storia.")
+print("Usa: chat('messaggio') | storia() | reset()\n")
+
+# ── Modifica qui il messaggio e riesegui la cella ──────────────────
+chat("Ciao! Mi chiamo Luca e sto valutando i vostri sensori.")
